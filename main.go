@@ -103,11 +103,58 @@ func getCheckForDuplicates() bool {
 	}
 } // get check value for output duplicates by hashSum from input value
 
+func getDeleteFiles() bool {
+	fmt.Println("\nDelete files?")
+	for {
+		res := getScanValue()
+		if res == "yes" {
+			return true
+		} else if res == "no" {
+			return false
+		}
+		fmt.Println("Wrong option")
+	}
+} // get check value for delete files from input value
+
 func getScanValue() string {
 	sc := bufio.NewScanner(os.Stdin)
 	sc.Scan()
 	return sc.Text()
 } // scan and return user input value
+
+func getNumbersToDeleteFiles(maxnumber int) []int {
+	fmt.Println("Enter file numbers to delete:")
+	for {
+		input := getScanValue()
+		res := parseInputNumbersToDeleteFiles(&input)
+		flag := true
+		if res == nil {
+			flag = false
+		}
+		for _, i := range res {
+			if i > maxnumber {
+				flag = false
+			}
+		}
+		if flag {
+			return res
+		}
+		fmt.Println("Wrong format")
+	}
+}
+
+func parseInputNumbersToDeleteFiles(str *string) (res []int) {
+	tmp := strings.Split(*str, " ")
+	for _, i := range tmp {
+		number, err := strconv.Atoi(i)
+		if err != nil {
+			return nil
+		}
+
+		res = append(res, number)
+	}
+	return res
+}
 
 func walkFilesByPath(path string, sliceFilesInfo *[]fileInfo, userFormatFile string) error {
 	err := filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
@@ -155,7 +202,19 @@ func sortingSliceFileInfoBySize(slice *[]fileInfo, sortOption descAscOption) {
 	}
 } // sorting slice with objects fileInfo by size
 
-func groupSlice[t int64 | string](slice *[]t) {
+func groupSliceSizeFiles(slice *[]int64) {
+	tmpSlice := *slice
+	for i := 0; i < len(tmpSlice)-1; i++ {
+		if tmpSlice[i] == tmpSlice[i+1] {
+			tmpSlice = append(tmpSlice[:i], tmpSlice[i+1:]...)
+			//			end = false
+			i--
+		}
+	}
+	*slice = tmpSlice
+} // grouping slice with sizes/hashSums values
+
+func groupSliceHashSums(slice *[]string) {
 	tmpSlice := *slice
 	for i := 0; i < len(tmpSlice)-1; i++ {
 		if tmpSlice[i] == tmpSlice[i+1] {
@@ -177,18 +236,24 @@ func groupDuplicationsHashSumsFromSlice(slice *[]string) {
 			i--
 		}
 	}
-	groupSlice(&resSlice)
+	groupSliceHashSums(&resSlice)
 	*slice = resSlice
 } // get slice with duplications hashSums and grouping
 
-func getGroupSliceMapSizeFiles(sliceFilesInfo *[]fileInfo) []int64 {
+func getGroupSliceSizeFiles(sliceFilesInfo *[]fileInfo) []int64 {
 	res := cutSliceSizeInfoFiles(sliceFilesInfo)
-	groupSlice(&res)
+	groupSliceSizeFiles(&res)
 	return res
 } // get grouping and sorting slice with sizes files from slice objects fileInfo
 
+func sotringSliceHashSum(slice *[]string) {
+	tmpSlice := *slice
+	sort.Slice(tmpSlice, func(i, j int) bool { return tmpSlice[i] > tmpSlice[j] })
+}
+
 func getGroupDuplicationSliceHashFiles(sliceFilesInfo *[]fileInfo) []string {
 	slice := cutSliceHashSumInfoFiles(sliceFilesInfo)
+	sotringSliceHashSum(&slice)
 	groupDuplicationsHashSumsFromSlice(&slice)
 	return slice
 } // get grouping and sorting slice with duplications hashSums from slice objets fileInfo
@@ -220,6 +285,10 @@ func printOutputHashDuplication(sliceFilesInfo *[]fileInfo, groupHash *[]string,
 	var menuForDelete []string
 	var tmpSLiceFilesInfo []fileInfo
 
+	if len(*groupHash) == 0 {
+		return nil
+	}
+
 	for _, obj := range *sliceFilesInfo {
 		for _, strHashSum := range *groupHash {
 			if strHashSum == obj.hashSum {
@@ -229,32 +298,68 @@ func printOutputHashDuplication(sliceFilesInfo *[]fileInfo, groupHash *[]string,
 	}
 
 	sortingSliceFileInfoBySize(&tmpSLiceFilesInfo, sortOption)
-
+	sliceHashSumForOutput := getGroupDuplicationSliceHashFiles(&tmpSLiceFilesInfo)
+	sliceSizeFilesForOutput := getGroupSliceSizeFiles(&tmpSLiceFilesInfo)
 	str := "\n"
 	count := 1
-	for i := 0; i < len(tmpSLiceFilesInfo); i++ {
-		menuForDelete = append(menuForDelete, tmpSLiceFilesInfo[i].path)
-		str = str + strconv.Itoa(count) + ". " + tmpSLiceFilesInfo[i].path + "\n"
-		if i == len(tmpSLiceFilesInfo)-1 {
-			str = "\nHash: " + tmpSLiceFilesInfo[i].hashSum + str
-			str = strconv.FormatInt(tmpSLiceFilesInfo[i].size, 10) + " bytes" + str
-			fmt.Println(str)
-			break
-		}
 
-		if tmpSLiceFilesInfo[i].hashSum != tmpSLiceFilesInfo[i+1].hashSum {
-			str = "\nHash: " + tmpSLiceFilesInfo[i].hashSum + str
+	for _, i := range sliceSizeFilesForOutput {
+		str += strconv.FormatInt(i, 10) + " bytes" + "\n"
+		for _, j := range sliceHashSumForOutput {
+			str += "Hash: " + j + "\n"
+			for _, k := range tmpSLiceFilesInfo {
+				if i == k.size && j == k.hashSum {
+					menuForDelete = append(menuForDelete, k.path)
+					str += strconv.Itoa(count) + ". " + k.path + "\n"
+					count++
+				}
+			}
 		}
-		if tmpSLiceFilesInfo[i].size != tmpSLiceFilesInfo[i+1].size {
-			str = strconv.FormatInt(tmpSLiceFilesInfo[i].size, 10) + " bytes" + str
-			fmt.Println(str)
-			str = "\n"
-		}
-		count++
+		str += "\n"
 	}
+
+	fmt.Println(str)
 
 	return menuForDelete
 } // print path files with duplications hashSums by grouped size
+
+func deleteFilesByNumbers(duplicationFiles *[]string, numbersToDelete *[]int) (res int64) {
+	tmpSlice := *duplicationFiles
+	for _, i := range *numbersToDelete {
+		file, err := os.Open(tmpSlice[i-1])
+		if err != nil {
+			return 0
+		}
+		fileInf, err := file.Stat()
+		if err != nil {
+			return 0
+		}
+		res += fileInf.Size()
+		err = file.Close()
+		if err != nil {
+			return 0
+		}
+		err = os.Remove(tmpSlice[i-1])
+		if err != nil {
+			return 0
+		}
+	}
+	return res
+}
+
+func printOutputSizeDeleteFiles(sizeDeleteFiles int64) {
+	str := "Total freed up space: " + strconv.FormatInt(sizeDeleteFiles, 10) + " bytes"
+	fmt.Println(str)
+}
+
+func deleteAndOutputDeleteFiles(duplicationFiles *[]string, numbersToDelete *[]int) error {
+	sizeDeleteFiles := deleteFilesByNumbers(duplicationFiles, numbersToDelete)
+	if sizeDeleteFiles == int64(0) {
+		return errors.New("")
+	}
+	printOutputSizeDeleteFiles(sizeDeleteFiles)
+	return nil
+}
 
 func main() {
 
@@ -280,7 +385,7 @@ func main() {
 
 	sortingSliceFileInfoBySize(&sliceFilesInfo, sortOption) // sorting slice with fileInfo by sort option
 
-	groupsSize := getGroupSliceMapSizeFiles(&sliceFilesInfo) // get slice with grouped and sorted sizes from slice with objects fileInfo
+	groupsSize := getGroupSliceSizeFiles(&sliceFilesInfo) // get slice with grouped and sorted sizes from slice with objects fileInfo
 
 	printOutputSizeSorting(&sliceFilesInfo, &groupsSize) // print file paths by grouped size
 
@@ -295,6 +400,16 @@ func main() {
 
 	groupsHash := getGroupDuplicationSliceHashFiles(&sliceFilesInfo) // get slice with grouped and sorted hashSums from slice with objects fileInfo
 
-	printOutputHashDuplication(&sliceFilesInfo, &groupsHash, sortOption) // print path files with duplications hashSums by grouped size
+	numbersToDeleteFiles := printOutputHashDuplication(&sliceFilesInfo, &groupsHash, sortOption) // print path files with duplications hashSums by grouped size and return numbers to delete files
 
+	if !getDeleteFiles() { // if not delete files
+		return
+	}
+
+	userNumbersToDeleteFiles := getNumbersToDeleteFiles(len(numbersToDeleteFiles))
+
+	err = deleteAndOutputDeleteFiles(&numbersToDeleteFiles, &userNumbersToDeleteFiles)
+	if err != nil {
+		return
+	}
 }
